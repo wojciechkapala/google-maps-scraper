@@ -6,24 +6,27 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"flag"
+	"fmt"
 	"io"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
-	// postgres driver
-	_ "github.com/jackc/pgx/v5/stdlib"
-
+	"github.com/gin-gonic/gin"
 	"github.com/gosom/scrapemate"
 	"github.com/gosom/scrapemate/adapters/writers/csvwriter"
 	"github.com/gosom/scrapemate/adapters/writers/jsonwriter"
 	"github.com/gosom/scrapemate/scrapemateapp"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/playwright-community/playwright-go"
-
-	"github.com/gosom/google-maps-scraper/gmaps"
-	"github.com/gosom/google-maps-scraper/postgres"
+	"github.com/wojciechkapala/google-maps-scraper/gmaps"
 )
+
+var args arguments
 
 func main() {
 	// just install playwright
@@ -31,210 +34,327 @@ func main() {
 		if err := installPlaywright(); err != nil {
 			os.Exit(1)
 		}
-
 		os.Exit(0)
 	}
 
-	if err := run(); err != nil {
-		os.Stderr.WriteString(err.Error() + "\n")
+	// Parsowanie flag odbywa się tylko raz
+	args = parseArgs()
 
-		os.Exit(1)
+	// Użycie sync.WaitGroup, aby program nie zakończył się przedwcześnie
+	var wg sync.WaitGroup
+	wg.Add(1)
 
-		return
-	}
+	// Uruchomienie serwera HTTP w gorutynie
+	go func() {
+		defer wg.Done()
+		startServer()
+	}()
 
-	os.Exit(0)
+	// Informacja, że serwer został uruchomiony
+	fmt.Println("Serwer został uruchomiony i nasłuchuje na porcie 8015")
+
+	// Czekanie na zakończenie gorutyny
+	wg.Wait()
 }
 
-func run() error {
-	ctx := context.Background()
-	args := parseArgs()
+type scrapeRequest struct {
+	LangCode    string `json:"langCode"`
+	MaxDepth    int    `json:"maxDepth"`
+	Email       bool   `json:"email"`
+	Phrase      string `json:"phrase"` // Nowe pole - opcjonalna fraza
+	ResultsFile string `json:"resultsFile"`
+	InputFile   string `json:"inputFile"`
+	Json        bool   `json:"json"`
+}
 
+type scrapeResponse struct {
+	Message   string `json:"message"`
+	Records   int    `json:"records"`
+	InputFile string `json:"inputFile"`
+}
+
+func startScraperInBackground(args arguments) {
+	go func() {
+		ctx := context.Background()
+		fmt.Println("Scraper rozpoczął pracę w tle...")
+		err := runScraper(ctx, args)
+		if err != nil {
+			fmt.Printf("Błąd scraper'a: %v\n", err)
+		}
+		fmt.Println("Scraper zakończył pracę.")
+	}()
+}
+
+type replaceRequest struct {
+	Phrase string `json:"phrase"` // Fraza, która zastąpi słowo "fraza" w szablonie
+}
+
+func startServer() {
+	router := gin.Default()
+
+	// Endpoint do sprawdzenia statusu
+	router.GET("/status", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "API działa poprawnie"})
+	})
+
+	router.POST("/scrape", func(c *gin.Context) {
+		var req scrapeRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Nieprawidłowe dane wejściowe"})
+			return
+		}
+
+		// Jeśli fraza jest podana, tworzymy plik wejściowy i wynikowy
+		if req.Phrase != "" {
+			templateContent, err := ioutil.ReadFile("miasta.txt")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Błąd podczas odczytywania szablonu"})
+				return
+			}
+
+			// Zastępujemy "fraza" na dostarczoną frazę
+			newContent := strings.ReplaceAll(string(templateContent), "fraza", req.Phrase)
+
+			// Tworzymy nowy plik wynikowy i wejściowy
+			inputFileName := fmt.Sprintf("%s_miasta.txt", req.Phrase)
+			err = ioutil.WriteFile(inputFileName, []byte(newContent), 0644)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Błąd podczas zapisywania nowego pliku wejściowego"})
+				return
+			}
+
+			// Ustawiamy inputFile i resultsFile na podstawie frazy
+			req.InputFile = inputFileName
+			req.ResultsFile = fmt.Sprintf("%s_results.json", req.Phrase)
+		}
+
+		// Sprawdzenie, czy pliki zostały ustawione
+		if req.InputFile == "" || req.ResultsFile == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Brak pliku wejściowego lub wynikowego"})
+			return
+		}
+
+		// Przykładowe obliczenie liczby rekordów, które będą przetwarzane
+		// (np. liczba linii w pliku)
+		fileContent, err := ioutil.ReadFile(req.InputFile)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Błąd podczas odczytywania pliku wejściowego"})
+			return
+		}
+		lines := strings.Count(string(fileContent), "\n")
+
+		// Konfigurujemy argumenty dla scraper'a
+		args := arguments{
+			langCode:    req.LangCode,
+			maxDepth:    req.MaxDepth,
+			email:       req.Email,
+			resultsFile: req.ResultsFile,
+			inputFile:   req.InputFile,
+			json:        req.Json,
+			concurrency: runtime.NumCPU() / 2,
+		}
+
+		// Uruchomienie scraper'a w tle
+		startScraperInBackground(args)
+
+		// Natychmiastowa odpowiedź z informacją o liczbie rekordów
+		response := scrapeResponse{
+			Message:   "Scraper rozpoczął pracę",
+			Records:   lines,
+			InputFile: req.InputFile,
+		}
+
+		c.JSON(http.StatusOK, response)
+	})
+
+	// Nowy endpoint do tworzenia pliku tekstowego na podstawie szablonu
+	router.POST("/createfile", func(c *gin.Context) {
+		// Oczekujemy JSON z frazą do zamiany
+		var req replaceRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Nieprawidłowe dane wejściowe"})
+			return
+		}
+
+		// Odczytujemy szablon z pliku miasta.txt
+		templateContent, err := ioutil.ReadFile("miasta.txt")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Błąd podczas odczytywania szablonu"})
+			return
+		}
+
+		// Zastępujemy "fraza" na dostarczoną frazę
+		newContent := strings.ReplaceAll(string(templateContent), "fraza", req.Phrase)
+
+		// Tworzymy nowy plik wynikowy
+		outputFileName := fmt.Sprintf("%s_miasta.txt", req.Phrase)
+		err = ioutil.WriteFile(outputFileName, []byte(newContent), 0644)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Błąd podczas zapisywania nowego pliku"})
+			return
+		}
+
+		// Zwracamy informację o utworzonym pliku
+		c.JSON(http.StatusOK, gin.H{"message": "Plik został utworzony", "file": outputFileName})
+	})
+
+	// Serwer będzie nasłuchiwał na porcie 8080
+	router.Run(":8015")
+}
+
+func runScraper(ctx context.Context, args arguments) error {
+	fmt.Println("Uruchamianie scraper'a...") // Debugowanie
+
+	// Zakładam, że nie korzystasz z bazy danych, więc pomiń `runFromDatabase`
 	if args.dsn == "" {
 		return runFromLocalFile(ctx, &args)
 	}
 
-	return runFromDatabase(ctx, &args)
+	// Jeśli potrzebujesz obsługi bazy danych, musisz zaimplementować `runFromDatabase`
+	return fmt.Errorf("Obsługa bazy danych nie jest zaimplementowana")
 }
 
-func runFromLocalFile(ctx context.Context, args *arguments) error {
-	var input io.Reader
+func createSeedJobs(langCode string, r io.Reader, maxDepth int, email bool) ([]scrapemate.IJob, error) {
+	fmt.Println("Rozpoczynam tworzenie zadań...") // Debugowanie
 
-	switch args.inputFile {
-	case "stdin":
-		input = os.Stdin
-	default:
-		f, err := os.Open(args.inputFile)
-		if err != nil {
-			return err
-		}
-
-		defer f.Close()
-
-		input = f
-	}
-
-	var resultsWriter io.Writer
-
-	switch args.resultsFile {
-	case "stdout":
-		resultsWriter = os.Stdout
-	default:
-		f, err := os.Create(args.resultsFile)
-		if err != nil {
-			return err
-		}
-
-		defer f.Close()
-
-		resultsWriter = f
-	}
-
-	csvWriter := csvwriter.NewCsvWriter(csv.NewWriter(resultsWriter))
-
-	writers := []scrapemate.ResultWriter{}
-
-	if args.json {
-		writers = append(writers, jsonwriter.NewJSONWriter(resultsWriter))
-	} else {
-		writers = append(writers, csvWriter)
-	}
-
-	opts := []func(*scrapemateapp.Config) error{
-		// scrapemateapp.WithCache("leveldb", "cache"),
-		scrapemateapp.WithConcurrency(args.concurrency),
-		scrapemateapp.WithExitOnInactivity(args.exitOnInactivityDuration),
-	}
-
-	if args.debug {
-		opts = append(opts, scrapemateapp.WithJS(
-			scrapemateapp.Headfull(),
-			scrapemateapp.DisableImages(),
-		),
-		)
-	} else {
-		opts = append(opts, scrapemateapp.WithJS(scrapemateapp.DisableImages()))
-	}
-
-	cfg, err := scrapemateapp.NewConfig(
-		writers,
-		opts...,
-	)
-	if err != nil {
-		return err
-	}
-
-	app, err := scrapemateapp.NewScrapeMateApp(cfg)
-	if err != nil {
-		return err
-	}
-
-	seedJobs, err := createSeedJobs(args.langCode, input, args.maxDepth, args.email)
-	if err != nil {
-		return err
-	}
-
-	return app.Start(ctx, seedJobs...)
-}
-
-func runFromDatabase(ctx context.Context, args *arguments) error {
-	db, err := openPsqlConn(args.dsn)
-	if err != nil {
-		return err
-	}
-
-	provider := postgres.NewProvider(db)
-
-	if args.produceOnly {
-		return produceSeedJobs(ctx, args, provider)
-	}
-
-	psqlWriter := postgres.NewResultWriter(db)
-
-	writers := []scrapemate.ResultWriter{
-		psqlWriter,
-	}
-
-	opts := []func(*scrapemateapp.Config) error{
-		// scrapemateapp.WithCache("leveldb", "cache"),
-		scrapemateapp.WithConcurrency(args.concurrency),
-		scrapemateapp.WithProvider(provider),
-		scrapemateapp.WithExitOnInactivity(args.exitOnInactivityDuration),
-	}
-
-	if args.debug {
-		opts = append(opts, scrapemateapp.WithJS(scrapemateapp.Headfull()))
-	} else {
-		opts = append(opts, scrapemateapp.WithJS())
-	}
-
-	cfg, err := scrapemateapp.NewConfig(
-		writers,
-		opts...,
-	)
-	if err != nil {
-		return err
-	}
-
-	app, err := scrapemateapp.NewScrapeMateApp(cfg)
-	if err != nil {
-		return err
-	}
-
-	return app.Start(ctx)
-}
-
-func produceSeedJobs(ctx context.Context, args *arguments, provider scrapemate.JobProvider) error {
-	var input io.Reader
-
-	switch args.inputFile {
-	case "stdin":
-		input = os.Stdin
-	default:
-		f, err := os.Open(args.inputFile)
-		if err != nil {
-			return err
-		}
-
-		defer f.Close()
-
-		input = f
-	}
-
-	jobs, err := createSeedJobs(args.langCode, input, args.maxDepth, args.email)
-	if err != nil {
-		return err
-	}
-
-	for i := range jobs {
-		if err := provider.Push(ctx, jobs[i]); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func createSeedJobs(langCode string, r io.Reader, maxDepth int, email bool) (jobs []scrapemate.IJob, err error) {
+	jobs := []scrapemate.IJob{}
 	scanner := bufio.NewScanner(r)
 
+	lineNumber := 0 // Licznik linii do debugowania
 	for scanner.Scan() {
+		lineNumber++
 		query := strings.TrimSpace(scanner.Text())
+		fmt.Printf("Przetwarzam linię %d: %s\n", lineNumber, query) // Debugowanie
+
+		// Jeśli linia jest pusta, pomiń
 		if query == "" {
+			fmt.Printf("Pusta linia, pomijam linię %d\n", lineNumber) // Debugowanie
 			continue
 		}
 
 		var id string
-
 		if before, after, ok := strings.Cut(query, "#!#"); ok {
 			query = strings.TrimSpace(before)
 			id = strings.TrimSpace(after)
+			fmt.Printf("Zidentyfikowano ID: %s dla zapytania: %s\n", id, query) // Debugowanie
 		}
 
-		jobs = append(jobs, gmaps.NewGmapJob(id, langCode, query, maxDepth, email))
+		// Tworzenie nowego zadania GmapJob
+		fmt.Println("Tworzę nowe zadanie GmapJob...") // Debugowanie
+		job := gmaps.NewGmapJob(id, langCode, query, maxDepth, email)
+		jobs = append(jobs, job)
+		fmt.Printf("Dodano zadanie: %v\n", job) // Debugowanie
 	}
 
-	return jobs, scanner.Err()
+	// Obsługa błędów skanowania
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("Błąd podczas skanowania pliku: %v", err)
+	}
+
+	fmt.Printf("Utworzono %d zadań\n", len(jobs)) // Debugowanie
+	return jobs, nil
+}
+
+func runFromLocalFile(ctx context.Context, args *arguments) error {
+	fmt.Println("Rozpoczynam przetwarzanie lokalnego pliku...") // Debugowanie
+
+	// Otwieranie pliku wejściowego lub czytanie z stdin
+	var input io.Reader
+	switch args.inputFile {
+	case "stdin":
+		fmt.Println("Czytam dane ze stdin") // Debugowanie
+		input = os.Stdin
+	default:
+		fmt.Println("Otwieram plik:", args.inputFile) // Debugowanie
+		f, err := os.Open(args.inputFile)
+		if err != nil {
+			return fmt.Errorf("Błąd podczas otwierania pliku %s: %v", args.inputFile, err)
+		}
+		defer func() {
+			fmt.Println("Zamykam plik wejściowy") // Debugowanie
+			f.Close()
+		}()
+		input = f
+	}
+
+	// Otwieranie pliku wynikowego lub pisanie na stdout
+	var resultsWriter io.Writer
+	switch args.resultsFile {
+	case "stdout":
+		fmt.Println("Zapisuję wyniki na stdout") // Debugowanie
+		resultsWriter = os.Stdout
+	default:
+		fmt.Println("Tworzę plik wynikowy:", args.resultsFile) // Debugowanie
+		f, err := os.Create(args.resultsFile)
+		if err != nil {
+			return fmt.Errorf("Błąd podczas tworzenia pliku wynikowego %s: %v", args.resultsFile, err)
+		}
+		defer func() {
+			fmt.Println("Zamykam plik wynikowy") // Debugowanie
+			f.Close()
+		}()
+		resultsWriter = f
+	}
+
+	// Ustawienie formatu zapisu wyników
+	csvWriter := csvwriter.NewCsvWriter(csv.NewWriter(resultsWriter))
+	writers := []scrapemate.ResultWriter{}
+	if args.json {
+		fmt.Println("Zapisuję wyniki w formacie JSON") // Debugowanie
+		writers = append(writers, jsonwriter.NewJSONWriter(resultsWriter))
+	} else {
+		fmt.Println("Zapisuję wyniki w formacie CSV") // Debugowanie
+		writers = append(writers, csvWriter)
+	}
+
+	// Opcje konfiguracji aplikacji
+	opts := []func(*scrapemateapp.Config) error{
+		scrapemateapp.WithConcurrency(args.concurrency),
+		scrapemateapp.WithExitOnInactivity(args.exitOnInactivityDuration),
+	}
+
+	// Obsługa trybu debugowania
+	if args.debug {
+		fmt.Println("Tryb debugowania jest włączony: Uruchamiam w trybie headfull i wyłączam obrazy") // Debugowanie
+		opts = append(opts, scrapemateapp.WithJS(
+			scrapemateapp.Headfull(),
+			scrapemateapp.DisableImages(),
+		))
+	} else {
+		fmt.Println("Uruchamiam w trybie headless") // Debugowanie
+		opts = append(opts, scrapemateapp.WithJS(scrapemateapp.DisableImages()))
+	}
+
+	// Tworzenie nowej konfiguracji aplikacji
+	fmt.Println("Tworzę nową konfigurację aplikacji...") // Debugowanie
+	cfg, err := scrapemateapp.NewConfig(writers, opts...)
+	if err != nil {
+		return fmt.Errorf("Błąd podczas tworzenia konfiguracji aplikacji: %v", err)
+	}
+
+	// Tworzenie nowej instancji aplikacji
+	fmt.Println("Tworzę nową instancję aplikacji ScrapeMate...") // Debugowanie
+	app, err := scrapemateapp.NewScrapeMateApp(cfg)
+	if err != nil {
+		return fmt.Errorf("Błąd podczas tworzenia aplikacji ScrapeMate: %v", err)
+	}
+
+	// Tworzenie zadań (jobs) na podstawie wejścia
+	fmt.Println("Tworzenie zadań...") // Debugowanie
+	seedJobs, err := createSeedJobs(args.langCode, input, args.maxDepth, args.email)
+	if err != nil {
+		return fmt.Errorf("Błąd podczas tworzenia zadań: %v", err)
+	}
+
+	// Uruchamianie aplikacji ScrapeMate
+	fmt.Println("Rozpoczynanie działania aplikacji ScrapeMate...") // Debugowanie
+	err = app.Start(ctx, seedJobs...)
+	if err != nil {
+		return fmt.Errorf("Błąd podczas uruchamiania ScrapeMate: %v", err)
+	}
+
+	fmt.Println("Zakończono działanie aplikacji ScrapeMate.") // Debugowanie
+	return nil
 }
 
 func installPlaywright() error {
