@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -187,7 +188,7 @@ func (j *CEIDGExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 	}
 
 	// Pobierz klucz API
-	apiKey := "sk-proj-SnkHyNq3bCUZdggjOLwKT3BlbkFJeLxLtaYGV078WROIFpAa" // Testowy klucz na sztywno
+	apiKey := os.Getenv("FIRMATEKA_API_KEY")
 	if apiKey == "" {
 		log.Error("API key not found in environment variables")
 		return j.Entry, nil, fmt.Errorf("missing API key")
