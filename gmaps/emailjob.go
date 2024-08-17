@@ -1,7 +1,6 @@
 package gmaps
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,13 +18,11 @@ import (
 
 type EmailExtractJob struct {
 	scrapemate.Job
-
 	Entry *Entry
 }
 
 type CEIDGExtractJob struct {
 	scrapemate.Job
-
 	Entry *Entry
 }
 
@@ -75,7 +72,7 @@ func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 	j.Entry.NIP = nip
 
 	if nip != "" {
-		job := bytes(j.Entry)
+		job := NewCEIDGJob(j.Entry)
 		return j.Entry, []scrapemate.IJob{job}, nil
 	}
 
@@ -164,7 +161,7 @@ func cleanNIP(nip string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(nip, "-", ""), " ", "")
 }
 
-func bytes(entry *Entry) *CEIDGExtractJob {
+func NewCEIDGJob(entry *Entry) *CEIDGExtractJob {
 	url := fmt.Sprintf("https://api.firmateka.pl/ceidg/firmy?nip=%s", cleanNIP(entry.NIP))
 
 	return &CEIDGExtractJob{

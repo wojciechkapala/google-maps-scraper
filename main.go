@@ -104,8 +104,9 @@ func startServer() {
 			return
 		}
 
-		// Jeśli fraza jest podana, tworzymy plik wejściowy i wynikowy
+		// Jeśli phrase jest podane, tworzymy plik input i ustawiamy nazwę pliku wynikowego
 		if req.Phrase != "" {
+			// Tworzymy nowy plik tekstowy z miastami na podstawie szablonu
 			templateContent, err := ioutil.ReadFile("miasta.txt")
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Błąd podczas odczytywania szablonu"})
@@ -123,25 +124,18 @@ func startServer() {
 				return
 			}
 
-			// Ustawiamy inputFile i resultsFile na podstawie frazy
+			// Ustawiamy inputFile i resultsFile na podstawie phrase
 			req.InputFile = inputFileName
 			req.ResultsFile = fmt.Sprintf("%s_results.json", req.Phrase)
 		}
 
-		// Sprawdzenie, czy pliki zostały ustawione
-		if req.InputFile == "" || req.ResultsFile == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Brak pliku wejściowego lub wynikowego"})
-			return
+		// Sprawdzenie, czy pliki zostały ustawione, jeśli nie ustawiamy na domyślne wartości
+		if req.InputFile == "" {
+			req.InputFile = "default_input.txt" // Można dostosować
 		}
-
-		// Przykładowe obliczenie liczby rekordów, które będą przetwarzane
-		// (np. liczba linii w pliku)
-		fileContent, err := ioutil.ReadFile(req.InputFile)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Błąd podczas odczytywania pliku wejściowego"})
-			return
+		if req.ResultsFile == "" {
+			req.ResultsFile = "default_results.json" // Można dostosować
 		}
-		lines := strings.Count(string(fileContent), "\n")
 
 		// Konfigurujemy argumenty dla scraper'a
 		args := arguments{
@@ -154,17 +148,18 @@ func startServer() {
 			concurrency: runtime.NumCPU() / 2,
 		}
 
-		// Uruchomienie scraper'a w tle
-		startScraperInBackground(args)
-
-		// Natychmiastowa odpowiedź z informacją o liczbie rekordów
-		response := scrapeResponse{
-			Message:   "Scraper rozpoczął pracę",
-			Records:   lines,
-			InputFile: req.InputFile,
+		ctx := context.Background()
+		err := runScraper(ctx, args)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
 
-		c.JSON(http.StatusOK, response)
+		c.JSON(http.StatusOK, gin.H{
+			"message":     "Scraper został uruchomiony",
+			"inputFile":   req.InputFile,
+			"resultsFile": req.ResultsFile,
+		})
 	})
 
 	// Nowy endpoint do tworzenia pliku tekstowego na podstawie szablonu

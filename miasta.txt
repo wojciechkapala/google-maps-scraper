@@ -1,0 +1,31 @@
+fraza Bytom
+fraza Chorzów
+fraza Częstochowa
+fraza Gliwice
+fraza Katowice
+fraza Ruda Śląska
+fraza Rybnik
+fraza Sosnowiec
+fraza Tarnowskie Góry
+fraza Tychy
+fraza Zabrze
+fraza Żory
+fraza Będzin
+fraza Dąbrowa Górnicza
+fraza Jaworzno
+fraza Jastrzębie-Zdrój
+fraza Mysłowice
+fraza Piekary Śląskie
+fraza Radzionków
+fraza Świętochłowice
+fraza Siemianowice Śląskie
+fraza Wodzisław Śląski
+fraza Bielsko-Biała
+fraza Bielsko
+fraza Mikołów
+fraza Czeladź
+fraza Skoczów
+fraza Strumień
+fraza Zawiercie
+fraza Żywiec
+fraza Zabrze
