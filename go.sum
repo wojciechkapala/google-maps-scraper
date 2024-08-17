@@ -31,6 +31,8 @@ github.com/golang/snappy v0.0.4/go.mod h1:/XxbfmMg8lxefKM7IXC3fBNl/7bRcc72aCRzEW
 github.com/google/go-cmp v0.5.9/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/gosom/google-maps-scraper v1.2.3 h1:9ucxXaP6BgxT+JPFp7Z9VQzzQj+YPopsb/YaEhXCF+I=
+github.com/gosom/google-maps-scraper v1.2.3/go.mod h1:xmmQs0hQGnJ6SUwCBoorcxszfPASJisZcqjWismH/TM=
 github.com/gosom/kit v0.0.0-20230309082109-543b32ac686a h1:5tcB33GTXm0pFUiEFpmE91tMsHQj+I+W7zubT8J/ugI=
 github.com/gosom/kit v0.0.0-20230309082109-543b32ac686a/go.mod h1:ngnWSsuBEpCA5Y43kZRa3x8RBYZZ4LDtvZHO4N5dHZ0=
 github.com/gosom/scrapemate v0.6.0 h1:Cd/iDxsIOYsMbnNqtiwoIg8eJmFlppSqoBmR5QgsgQE=

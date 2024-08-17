@@ -23,6 +23,7 @@ require (
 	github.com/go-playground/validator/v10 v10.20.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/wojciechkapala/google-maps-scraper v1.2.3 // indirect
 	github.com/gosom/kit v0.0.0-20230309082109-543b32ac686a // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20231201235250-de7065d80cb9 // indirect
