@@ -1,12 +1,12 @@
 package gmaps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -74,7 +74,7 @@ func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 	j.Entry.NIP = nip
 
 	if nip != "" {
-		job := NewCEIDGJob(j.Entry)
+		job := bytes(j.Entry)
 		return j.Entry, []scrapemate.IJob{job}, nil
 	}
 
@@ -163,7 +163,7 @@ func cleanNIP(nip string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(nip, "-", ""), " ", "")
 }
 
-func NewCEIDGJob(entry *Entry) *CEIDGExtractJob {
+func bytes(entry *Entry) *CEIDGExtractJob {
 	url := fmt.Sprintf("https://api.firmateka.pl/ceidg/firmy?nip=%s", cleanNIP(entry.NIP))
 
 	return &CEIDGExtractJob{
