@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gosom/scrapemate"
+	"github.com/joho/godotenv"
 	"github.com/mcnijman/go-emailaddress"
 )
 
@@ -179,12 +179,22 @@ func (j *CEIDGExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 	log := scrapemate.GetLoggerFromContext(ctx)
 	log.Info("Processing CEIDG job", "url", j.URL)
 
-	// Pobranie klucza API z zmiennych środowiskowych
-	apiKey := os.Getenv("FIRMATEKA_API_KEY")
+	// Załaduj zmienne środowiskowe
+	err := godotenv.Load()
+	if err != nil {
+		log.Error("Error loading .env file")
+		return j.Entry, nil, fmt.Errorf("could not load .env file")
+	}
+
+	// Pobierz klucz API
+	apiKey := "sk-proj-SnkHyNq3bCUZdggjOLwKT3BlbkFJeLxLtaYGV078WROIFpAa" // Testowy klucz na sztywno
 	if apiKey == "" {
 		log.Error("API key not found in environment variables")
 		return j.Entry, nil, fmt.Errorf("missing API key")
 	}
+
+	// Dodaj debugowanie, aby sprawdzić, czy klucz API został poprawnie załadowany
+	log.Info("Loaded API key", "apiKey", apiKey)
 
 	// Utworzenie zapytania HTTP
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -196,7 +206,6 @@ func (j *CEIDGExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
-	// Wysłanie zapytania do API Firmateka
 	respAPI, err := client.Do(req)
 	if err != nil {
 		log.Error("Error sending request to Firmateka API", "error", err)
@@ -204,11 +213,14 @@ func (j *CEIDGExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 	}
 	defer respAPI.Body.Close()
 
+	log.Info("Response Status Code", "statusCode", respAPI.StatusCode)
+
 	body, err := ioutil.ReadAll(respAPI.Body)
 	if err != nil {
-		log.Error("Error reading response body from Firmateka API", "error", err)
+		log.Error("Error reading response body", "error", err)
 		return j.Entry, nil, err
 	}
+	log.Info("Response Body", "body", string(body))
 
 	// Przetwarzanie odpowiedzi jako JSON
 	var firmatekaResponse struct {

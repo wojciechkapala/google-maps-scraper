@@ -1,0 +1,31 @@
+biuro podatkowe  Bytom
+biuro podatkowe  Chorzów
+biuro podatkowe  Częstochowa
+biuro podatkowe  Gliwice
+biuro podatkowe  Katowice
+biuro podatkowe  Ruda Śląska
+biuro podatkowe  Rybnik
+biuro podatkowe  Sosnowiec
+biuro podatkowe  Tarnowskie Góry
+biuro podatkowe  Tychy
+biuro podatkowe  Zabrze
+biuro podatkowe  Żory
+biuro podatkowe  Będzin
+biuro podatkowe  Dąbrowa Górnicza
+biuro podatkowe  Jaworzno
+biuro podatkowe  Jastrzębie-Zdrój
+biuro podatkowe  Mysłowice
+biuro podatkowe  Piekary Śląskie
+biuro podatkowe  Radzionków
+biuro podatkowe  Świętochłowice
+biuro podatkowe  Siemianowice Śląskie
+biuro podatkowe  Wodzisław Śląski
+biuro podatkowe  Bielsko-Biała
+biuro podatkowe  Bielsko
+biuro podatkowe  Mikołów
+biuro podatkowe  Czeladź
+biuro podatkowe  Skoczów
+biuro podatkowe  Strumień
+biuro podatkowe  Zawiercie
+biuro podatkowe  Żywiec
+biuro podatkowe  Zabrze
