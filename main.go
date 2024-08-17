@@ -22,6 +22,7 @@ import (
 	"github.com/gosom/scrapemate/adapters/writers/jsonwriter"
 	"github.com/gosom/scrapemate/scrapemateapp"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/joho/godotenv"
 	"github.com/playwright-community/playwright-go"
 	"github.com/wojciechkapala/google-maps-scraper/gmaps"
 )
@@ -29,6 +30,17 @@ import (
 var args arguments
 
 func main() {
+
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file")
+	}
+
+	// Pobranie klucza API z pliku .env
+	apiKey := os.Getenv("FIRMATEKA_API_KEY")
+	if apiKey == "" {
+		log.Fatal("API key not found in .env file")
+	}
 	// just install playwright
 	if os.Getenv("PLAYWRIGHT_INSTALL_ONLY") == "1" {
 		if err := installPlaywright(); err != nil {
