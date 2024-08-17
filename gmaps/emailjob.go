@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -163,7 +164,7 @@ func cleanNIP(nip string) string {
 }
 
 func NewCEIDGJob(entry *Entry) *CEIDGExtractJob {
-	url := fmt.Sprintf("https://wl-api.mf.gov.pl/api/search/nip/%s?date=%s", cleanNIP(entry.NIP), time.Now().Format("2006-01-02"))
+	url := fmt.Sprintf("https://api.firmateka.pl/ceidg/firmy?nip=%s", cleanNIP(entry.NIP))
 
 	return &CEIDGExtractJob{
 		Job: scrapemate.Job{
@@ -180,36 +181,108 @@ func (j *CEIDGExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 	log := scrapemate.GetLoggerFromContext(ctx)
 	log.Info("Processing CEIDG job", "url", j.URL)
 
-	if resp.Error != nil {
-		return j.Entry, nil, nil
+	// Pobranie klucza API z zmiennych środowiskowych
+	apiKey := os.Getenv("FIRMATEKA_API_KEY")
+	if apiKey == "" {
+		log.Error("API key not found in environment variables")
+		return j.Entry, nil, fmt.Errorf("missing API key")
 	}
 
-	body, err := ioutil.ReadAll(bytes.NewReader(resp.Body))
+	// Utworzenie zapytania HTTP
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", j.URL, nil)
 	if err != nil {
-		log.Error("Error reading response body from CEIDG API", "error", err)
+		log.Error("Error creating request", "error", err)
 		return j.Entry, nil, err
 	}
 
-	var ceidgResponse map[string]interface{}
-	err = json.Unmarshal(body, &ceidgResponse)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+
+	// Wysłanie zapytania do API Firmateka
+	respAPI, err := client.Do(req)
 	if err != nil {
-		log.Error("Error unmarshalling CEIDG response", "error", err)
+		log.Error("Error sending request to Firmateka API", "error", err)
+		return j.Entry, nil, err
+	}
+	defer respAPI.Body.Close()
+
+	body, err := ioutil.ReadAll(respAPI.Body)
+	if err != nil {
+		log.Error("Error reading response body from Firmateka API", "error", err)
 		return j.Entry, nil, err
 	}
 
-	if result, ok := ceidgResponse["result"].(map[string]interface{}); ok {
-		name, _ := result["name"].(string)
-		nip, _ := result["nip"].(string)
-		statusVat, _ := result["statusVat"].(string)
-		regon, _ := result["regon"].(string)
-		residenceAddress, _ := result["residenceAddress"].(string)
-		legalDate, _ := result["registrationLegalDate"].(string)
+	// Przetwarzanie odpowiedzi jako JSON
+	var firmatekaResponse struct {
+		Firmy []struct {
+			ID                string `json:"id"`
+			Nazwa             string `json:"nazwa"`
+			AdresDzialalnosci struct {
+				Ulica       string `json:"ulica"`
+				Budynek     string `json:"budynek"`
+				Miasto      string `json:"miasto"`
+				Wojewodztwo string `json:"wojewodztwo"`
+				Powiat      string `json:"powiat"`
+				Gmina       string `json:"gmina"`
+				Kraj        string `json:"kraj"`
+				Kod         string `json:"kod"`
+			} `json:"adresDzialalnosci"`
+			Wlasciciel struct {
+				Imie     string `json:"imie"`
+				Nazwisko string `json:"nazwisko"`
+				Nip      string `json:"nip"`
+				Regon    string `json:"regon"`
+			} `json:"wlasciciel"`
+			DataRozpoczecia string `json:"dataRozpoczecia"`
+			Status          string `json:"status"`
+			Link            string `json:"link"`
+		} `json:"firmy"`
+	}
 
-		ceidgData := fmt.Sprintf(`{"name":"%s","nip":"%s","statusVat":"%s","regon":"%s","residenceAddress":"%s","registrationLegalDate":"%s"}`,
-			name, nip, statusVat, regon, residenceAddress, legalDate)
+	err = json.Unmarshal(body, &firmatekaResponse)
+	if err != nil {
+		log.Error("Error unmarshalling Firmateka response", "error", err)
+		return j.Entry, nil, err
+	}
+
+	// Sprawdzamy, czy odpowiedź zawiera dane firmy
+	if len(firmatekaResponse.Firmy) > 0 {
+		firma := firmatekaResponse.Firmy[0]
+
+		ceidgData := fmt.Sprintf(`{
+			"id": "%s",
+			"nazwa": "%s",
+			"wlasciciel": {
+				"imie": "%s",
+				"nazwisko": "%s",
+				"nip": "%s",
+				"regon": "%s"
+			},
+			"adresDzialalnosci": {
+				"ulica": "%s",
+				"budynek": "%s",
+				"miasto": "%s",
+				"wojewodztwo": "%s",
+				"powiat": "%s",
+				"gmina": "%s",
+				"kraj": "%s",
+				"kod": "%s"
+			},
+			"dataRozpoczecia": "%s",
+			"status": "%s",
+			"link": "%s"
+		}`,
+			firma.ID,
+			firma.Nazwa,
+			firma.Wlasciciel.Imie, firma.Wlasciciel.Nazwisko, firma.Wlasciciel.Nip, firma.Wlasciciel.Regon,
+			firma.AdresDzialalnosci.Ulica, firma.AdresDzialalnosci.Budynek, firma.AdresDzialalnosci.Miasto,
+			firma.AdresDzialalnosci.Wojewodztwo, firma.AdresDzialalnosci.Powiat, firma.AdresDzialalnosci.Gmina,
+			firma.AdresDzialalnosci.Kraj, firma.AdresDzialalnosci.Kod,
+			firma.DataRozpoczecia, firma.Status, firma.Link)
+
 		j.Entry.CEIDG = ceidgData
 	} else {
-		log.Info("CEIDG data not found", "url", j.URL)
+		log.Info("Firmateka data not found", "url", j.URL)
 	}
 
 	return j.Entry, nil, nil
